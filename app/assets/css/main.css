@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  /* MDN-inspired dark theme */
+  --background: #0f0f23;
+  --foreground: #ffffff;
+  --muted: #1a1a2e;
+  --border: #16213e;
+  --accent: #5b21b6;
+  --accent-hover: #7c3aed;
+  --blue-accent: #3b82f6;
+  --purple-accent: #8b5cf6;
+  --code-bg: #1e1e2e;
+  --success: #10b981;
+  --warning: #f59e0b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Custom scrollbar for webkit browsers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-hover);
+}
+
+/* Focus styles for accessibility */
+.focus-visible {
+  outline: 2px solid var(--blue-accent);
+  outline-offset: 2px;
+}
