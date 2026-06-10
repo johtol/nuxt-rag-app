@@ -1,0 +1,19 @@
+# docker-compose.yml
+services:
+  db:
+    # image with postgres and pgvector already installed
+    image: pgvector/pgvector:pg16
+    restart: always
+    # set shared memory limit when using docker compose
+    shm_size: 128mb
+    ports:
+      - 5455:5432
+    environment:
+      POSTGRES_PASSWORD: example
+      POSTGRES_USER: example
+      POSTGRES_DB: example
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

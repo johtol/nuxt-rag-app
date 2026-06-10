@@ -59,8 +59,18 @@ bun run dev
 
    ```bash
    bun run db:up
+   bun run db:generate
    bun run db:migrate
    ```
+
+   Drizzle is configured with:
+
+   - Config: `drizzle.config.ts`
+   - Schema: `server/db/schema.ts`
+   - DB client: `server/utils/db.ts`
+   - Migration helper: `scripts/migrate.mjs` (wraps drizzle-kit to handle PostgreSQL NOTICE messages)
+
+   Use `DATABASE_URL` in your `.env` file (see `.env.example`).
 
 4. **Seed Database**: Process and store your documents:
 
