@@ -57,37 +57,35 @@ bun run dev
 
 3. **Database**: Make sure PostgreSQL with pgvector extension is running:
 
-   ```bash
-   bun run db:up
-   bun run db:generate
-   bun run db:migrate
-   ```
+    ```bash
+    bun run db:up
+    bun run db:generate
+    bun run db:migrate
+    bun run db:seed
+    ```
 
-   Drizzle is configured with:
+    Drizzle is configured with:
 
-   - Config: `drizzle.config.ts`
-   - Schema barrel: `server/db/schema.ts`
-   - Schema files:
-     - `server/db/schema/documents.ts`
-     - `server/db/schema/chunks.ts`
-     - `server/db/schema/conversations.ts`
-     - `server/db/schema/messages.ts`
-     - `server/db/schema/message-sources.ts`
-   - DB client: `server/utils/db.ts`
-   - Migration helper: `scripts/migrate.mjs` (wraps drizzle-kit to handle PostgreSQL NOTICE messages)
+    - Config: `drizzle.config.ts`
+    - Schema barrel: `server/db/schema.ts`
+    - Schema files:
+      - `server/db/schema/documents.ts`
+      - `server/db/schema/chunks.ts`
+      - `server/db/schema/conversations.ts`
+      - `server/db/schema/messages.ts`
+      - `server/db/schema/message-sources.ts`
+    - DB client: `server/utils/db.ts`
+    - Migration helper: `scripts/migrate.mjs` (applies pending migrations from journal, tolerates missing historical files)
+    - Seed script: `scripts/seed.mjs` (imports documents + chunks from `chunks.json`)
 
-   Use `DATABASE_URL` in your `.env` file (see `.env.example`).
+    Use `DATABASE_URL` in your `.env` file (see `.env.example`).
 
-4. **Seed Database**: Process and store your documents:
+4. **Optional: Re-seed or chunk new docs**:
 
-   ```bash
-   bun run db:seed
-   ```
+    ```bash
+    # If you update chunks.json, re-run seed
+    bun run db:seed
+    ```
 
-5. **Chunk Docs**: Process and store your documents (optional - chunks.json saved to repo):
-
-   ```bash
-   bun run chunk-docs
-   ```
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.

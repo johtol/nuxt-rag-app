@@ -16,7 +16,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx scripts/seed-database.ts",
+    "db:seed": "node scripts/seed.mjs",
     "semantic-search": "tsx scripts/semantic-search.ts",
     "rag-query": "tsx scripts/rag-query.ts"
   },
