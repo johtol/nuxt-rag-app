@@ -66,7 +66,13 @@ bun run dev
    Drizzle is configured with:
 
    - Config: `drizzle.config.ts`
-   - Schema: `server/db/schema.ts`
+   - Schema barrel: `server/db/schema.ts`
+   - Schema files:
+     - `server/db/schema/documents.ts`
+     - `server/db/schema/chunks.ts`
+     - `server/db/schema/conversations.ts`
+     - `server/db/schema/messages.ts`
+     - `server/db/schema/message-sources.ts`
    - DB client: `server/utils/db.ts`
    - Migration helper: `scripts/migrate.mjs` (wraps drizzle-kit to handle PostgreSQL NOTICE messages)
 
