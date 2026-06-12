@@ -21,6 +21,7 @@
     "rag-query": "tsx scripts/rag-query.ts"
   },
   "dependencies": {
+    "@ai-sdk/voyage": "^1.0.5",
     "@tailwindcss/vite": "^4.3.0",
     "ai": "^6.0.199",
     "drizzle-orm": "^0.45.2",
