@@ -178,16 +178,29 @@ async function main() {
   const answer = await getAnswerFromOpenAI(prompt)
 
   console.log(`\nQuestion: ${question}\n`)
-  console.log('Answer:')
+  console.log('OpenAI Answer:')
   console.log(answer)
   console.log('\nRetrieved context:')
 
   filteredChunks.forEach((chunk, index) => {
     const title = chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
-    const similarity = (chunk.similarity * 100).toFixed(2)
+    const similarity = Math.round(chunk.similarity * 100)
+    const normalizedContent = chunk.content.replace(/\s+/g, ' ').trim()
+    const contextPreview = normalizedContent.length > 100
+      ? `${normalizedContent.slice(0, 100)}...`
+      : normalizedContent || 'N/A'
+    const lineRange = chunk.startLine !== null && chunk.endLine !== null
+      ? `${chunk.startLine}-${chunk.endLine}`
+      : 'N/A'
 
-    console.log(`- [Source ${index + 1}] ${title} (${similarity}%)`)
-    console.log(`  ${chunk.metadata.source ?? 'N/A'}`)
+    console.log(`[Source ${index + 1}]:`)
+    console.log(`  Document: ${title}`)
+    console.log(`  Source: ${chunk.metadata.source ?? 'N/A'}`)
+    console.log(`  Similarity: ${similarity}%`)
+    console.log(`  Context: ${contextPreview}`)
+    console.log(`  Line-Range: ${lineRange}`)
+    console.log(`  Chunk-ID: ${chunk.externalChunkId}`)
+    console.log('')
   })
 }
 
