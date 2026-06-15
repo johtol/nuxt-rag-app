@@ -102,6 +102,7 @@ Optional environment variables:
 - `RAG_MIN_SIMILARITY` (default: `0.6`, range `0` to `1`)
 
 The retrieval flow first gets top-K chunks by vector similarity, then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM.
+Retrieved chunks are serialized into XML tags (`document`, `title`, `section`, `similarity`, `source_url`, `content`) before prompting the model.
 
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
