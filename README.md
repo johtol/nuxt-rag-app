@@ -87,5 +87,21 @@ bun run dev
     bun run db:seed
     ```
 
+## Ask Questions with RAG
+
+Use the script below to retrieve similar chunks and ask an LLM using that context:
+
+```bash
+bun run rag:ask -- "What is a JavaScript closure?"
+```
+
+Optional environment variables:
+
+- `OPENAI_MODEL` (default: `gpt-4.1-mini`)
+- `RAG_TOP_K` (default: `5`)
+- `RAG_MIN_SIMILARITY` (default: `0.6`, range `0` to `1`)
+
+The retrieval flow first gets top-K chunks by vector similarity, then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM.
+
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
