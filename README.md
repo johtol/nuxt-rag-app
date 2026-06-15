@@ -59,50 +59,47 @@ bun run dev
 
     ```bash
     bun run db:up
-    bun run db:generate
     bun run db:migrate
-    bun run db:seed
     ```
-
+   
     Drizzle is configured with:
-
-    - Config: `drizzle.config.ts`
-    - Schema barrel: `server/db/schema.ts`
-    - Schema files:
-      - `server/db/schema/documents.ts`
-      - `server/db/schema/chunks.ts`
-      - `server/db/schema/conversations.ts`
-      - `server/db/schema/messages.ts`
-      - `server/db/schema/message-sources.ts`
-    - DB client: `server/utils/db.ts`
-    - Migration helper: `scripts/migrate.mjs` (applies pending migrations from journal, tolerates missing historical files)
-    - Seed script: `scripts/seed.mjs` (imports documents + chunks from `chunks.json`)
-
-    Use `DATABASE_URL` in your `.env` file (see `.env.example`).
-
-4. **Optional: Re-seed or chunk new docs**:
+        - Config: `drizzle.config.ts`
+        - Schema barrel: `server/db/schema.ts`
+        - Schema files:
+          - `server/db/schema/documents.ts`
+          - `server/db/schema/chunks.ts`
+          - `server/db/schema/conversations.ts`
+          - `server/db/schema/messages.ts`
+          - `server/db/schema/message-sources.ts`
+        - DB client: `server/utils/db.ts`
+        - Migration helper: `scripts/migrate.mjs` (applies pending migrations from journal, tolerates missing historical files)
+        - Seed script: `scripts/seed.mjs` (imports documents + chunks from `chunks.json`)  
+        Use `DATABASE_URL` in your `.env` file (see `.env.example`).
+      
+4. **Chunk Docs**: Process and store your documents (optional - `chunks.json` saved to repo):
 
     ```bash
-    # If you update chunks.json, re-run seed
+    bun run chunk-docs
+    ```
+    
+5. **(Optional) Seed Database**: Process and store your documents:
+    
+    ```bash    
+    # If you update chunks.json, re-run seed 
     bun run db:seed
     ```
 
-## Ask Questions with RAG
+6. **Semantic Search**: Search for relevant document:
+    ```bash
+    bun run semantic-search -- "Your search query here"
+    ```
 
-Use the script below to retrieve similar chunks and ask an LLM using that context:
-
-```bash
-bun run rag:ask -- "What is a JavaScript closure?"
-```
-
-Optional environment variables:
-
-- `OPENAI_MODEL` (default: `gpt-4.1-mini`)
-- `RAG_TOP_K` (default: `5`)
-- `RAG_MIN_SIMILARITY` (default: `0.6`, range `0` to `1`)
-
-The retrieval flow first gets top-K chunks by vector similarity, then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM.
-Retrieved chunks are serialized into XML tags (`document`, `title`, `section`, `similarity`, `source_url`, `content`) before prompting the model.
+7. **RAG Query**: Query the LLM using the retrieved semantically similar chunks as context:
+    ```bash
+    bun run rag:ask -- "What is a JavaScript closure?"
+    ```
+   
+    The retrieval flow first gets top-K chunks by vector similarity, then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM. Retrieved chunks are serialized into XML tags (`document`, `title`, `section`, `similarity`, `source_url`, `content`) before prompting the model.
 
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
