@@ -1,9 +1,9 @@
 <template>
   <div id="main-page">
-    <Chat></Chat>
+    <Chat />
   </div>
 </template>
 
 <script setup>
-import Chat from "@/components/Chat"
+import Chat from '@/components/Chat'
 </script>

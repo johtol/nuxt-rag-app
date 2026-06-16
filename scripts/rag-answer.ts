@@ -53,7 +53,7 @@ function escapeXml(value: string): string {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;')
+    .replaceAll('\'', '&apos;')
 }
 
 /**
@@ -65,9 +65,10 @@ function escapeXml(value: string): string {
 function buildXmlContext(chunks: SimilarChunk[]): string {
   const documentsXml = chunks
     .map((chunk, index) => {
-      const title = chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
+      // Prefer joined document fields, fallback to chunk metadata for older rows.
+      const title = chunk.documentTitle ?? chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
       const section = chunk.headingText ?? 'No heading'
-      const sourceUrl = chunk.metadata.source ?? 'N/A'
+      const sourceUrl = chunk.documentSource ?? chunk.metadata.source ?? 'N/A'
       const similarityPct = (chunk.similarity * 100).toFixed(2)
 
       return [
@@ -79,7 +80,7 @@ function buildXmlContext(chunks: SimilarChunk[]): string {
         `    <similarity score="${chunk.similarity.toFixed(6)}">${similarityPct}%</similarity>`,
         `    <source_url>${escapeXml(sourceUrl)}</source_url>`,
         `    <content>${escapeXml(chunk.content)}</content>`,
-        '  </document>',
+        '  </document>'
       ].join('\n')
     })
     .join('\n')
@@ -95,19 +96,19 @@ async function getAnswerFromOpenAI(prompt: string): Promise<string> {
   const systemPrompt: OpenAIInputText = {
     type: 'input_text',
     // Keep all policy/rules in one place to avoid contradictory prompt instructions.
-    text: ragSystemPolicy,
+    text: ragSystemPolicy
   }
 
   const userPrompt: OpenAIInputText = {
     type: 'input_text',
-    text: prompt,
+    text: prompt
   }
 
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
     },
     body: JSON.stringify({
       model: openAiModel,
@@ -115,14 +116,14 @@ async function getAnswerFromOpenAI(prompt: string): Promise<string> {
       input: [
         {
           role: 'system',
-          content: [systemPrompt],
+          content: [systemPrompt]
         },
         {
           role: 'user',
-          content: [userPrompt],
-        },
-      ],
-    }),
+          content: [userPrompt]
+        }
+      ]
+    })
   })
 
   if (!response.ok) {
@@ -157,7 +158,7 @@ async function main() {
   }
 
   // Step 2: Apply threshold filtering before prompting the model.
-  const filteredChunks = retrievedChunks.filter((chunk) => chunk.similarity >= minSimilarity)
+  const filteredChunks = retrievedChunks.filter(chunk => chunk.similarity >= minSimilarity)
 
   if (filteredChunks.length === 0) {
     console.log(
@@ -171,7 +172,7 @@ async function main() {
   const prompt = [
     `<question>${escapeXml(question)}</question>`,
     '',
-    xmlContext,
+    xmlContext
   ].join('\n')
 
   // Step 4: Generate answer and print traceable sources.
@@ -183,7 +184,9 @@ async function main() {
   console.log('\nRetrieved context:')
 
   filteredChunks.forEach((chunk, index) => {
-    const title = chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
+    // Printed trace is intentionally compact so each source is easy to scan in terminals.
+    const title = chunk.documentTitle ?? chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
+    const source = chunk.documentSource ?? chunk.metadata.source ?? 'N/A'
     const similarity = Math.round(chunk.similarity * 100)
     const normalizedContent = chunk.content.replace(/\s+/g, ' ').trim()
     const contextPreview = normalizedContent.length > 100
@@ -195,7 +198,7 @@ async function main() {
 
     console.log(`[Source ${index + 1}]:`)
     console.log(`  Document: ${title}`)
-    console.log(`  Source: ${chunk.metadata.source ?? 'N/A'}`)
+    console.log(`  Source: ${source}`)
     console.log(`  Similarity: ${similarity}%`)
     console.log(`  Context: ${contextPreview}`)
     console.log(`  Line-Range: ${lineRange}`)

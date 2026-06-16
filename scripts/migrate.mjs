@@ -124,9 +124,8 @@ async function migrate() {
   }
 }
 
-migrate().catch(error => {
+migrate().catch((error) => {
   console.error('[✗] Migration failed')
   console.error(error)
   process.exit(1)
 })
-

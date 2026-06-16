@@ -1,7 +1,7 @@
-import { index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
-import { chunks } from './chunks';
-import { messages } from './messages';
+import { chunks } from './chunks'
+import { messages } from './messages'
 
 export const messageSources = pgTable(
   'message_sources',
@@ -16,14 +16,13 @@ export const messageSources = pgTable(
     rank: integer('rank').notNull(),
     score: real('score'),
     snippet: text('snippet'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
   },
-  (table) => ({
+  table => ({
     messageRankIdx: index('message_sources_message_rank_idx').on(table.messageId, table.rank),
-    messageChunkUniqueIdx: uniqueIndex('message_sources_message_chunk_unique_idx').on(table.messageId, table.chunkId),
+    messageChunkUniqueIdx: uniqueIndex('message_sources_message_chunk_unique_idx').on(table.messageId, table.chunkId)
   })
-);
+)
 
-export type MessageSource = typeof messageSources.$inferSelect;
-export type NewMessageSource = typeof messageSources.$inferInsert;
-
+export type MessageSource = typeof messageSources.$inferSelect
+export type NewMessageSource = typeof messageSources.$inferInsert

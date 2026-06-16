@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 import { createVoyage } from '@ai-sdk/voyage'
 import { embed } from 'ai'
@@ -14,6 +13,7 @@ export interface ChunkMetadata {
 }
 
 interface RawChunkRow {
+  // Mirrors SQL aliases from the retrieval query below.
   id: string
   external_chunk_id: string
   document_id: string
@@ -25,13 +25,20 @@ interface RawChunkRow {
   heading_level: number | null
   heading_line_number: number | null
   metadata: unknown
+  document_title: string | null
+  document_source: string | null
+  document_slug: string | null
   similarity: number | string
 }
 
 export interface SimilarChunk {
+  // Canonical document fields come from the `documents` table join.
   id: string
   externalChunkId: string
   documentId: string
+  documentTitle: string | null
+  documentSource: string | null
+  documentSlug: string | null
   chunkIndex: number
   content: string
   startLine: number | null
@@ -106,88 +113,57 @@ export async function searchSimilarChunks(options: SearchSimilarChunksOptions): 
   const embeddingModel = voyage.textEmbeddingModel('voyage-large-2')
 
   try {
-    const { embedding } = await embed({
-      model: embeddingModel,
-      value: question,
-    })
+     const { embedding } = await embed({
+       model: embeddingModel,
+       value: question
+     })
 
-    const queryVector = `[${embedding.join(',')}]`
-    const rows = await sql<RawChunkRow[]>`
-      select
-        c.id,
-        c.external_chunk_id,
-        c.document_id,
-        c.chunk_index,
-        c.content,
-        c.start_line,
-        c.end_line,
-        c.heading_text,
-        c.heading_level,
-        c.heading_line_number,
-        c.metadata,
-        -- Converts cosine distance to similarity in the 0-1 range.
-        1 - (c.embedding <=> ${queryVector}::vector) as similarity
-      from chunks c
-      where c.embedding is not null
-      order by similarity desc
-      limit ${topK}
-    `
+     // pgvector expects a textual vector literal when parameterizing from JS.
+     const queryVector = `[${embedding.join(',')}]`
+     const rows = await sql<RawChunkRow[]>`
+       select
+         c.id,
+         c.external_chunk_id,
+         c.document_id,
+         c.chunk_index,
+         c.content,
+         c.start_line,
+         c.end_line,
+         c.heading_text,
+         c.heading_level,
+         c.heading_line_number,
+         c.metadata,
+         d.title as document_title,
+         d.source as document_source,
+         d.slug as document_slug,
+         -- Converts cosine distance to similarity in the 0-1 range.
+         1 - (c.embedding <=> ${queryVector}::vector) as similarity
+       from chunks c
+       -- Pull canonical title/source from parent document relation.
+       inner join documents d on d.id = c.document_id
+       where c.embedding is not null
+       order by similarity desc
+       limit ${topK}
+     `
 
-    return rows.map((row) => ({
-      id: row.id,
-      externalChunkId: row.external_chunk_id,
-      documentId: row.document_id,
-      chunkIndex: row.chunk_index,
-      content: row.content,
-      startLine: row.start_line,
-      endLine: row.end_line,
-      headingText: row.heading_text,
-      headingLevel: row.heading_level,
-      headingLineNumber: row.heading_line_number,
-      metadata: parseChunkMetadata(row.metadata),
-      similarity: Number(row.similarity),
-    }))
+     return rows.map(row => ({
+       id: row.id,
+       externalChunkId: row.external_chunk_id,
+       documentId: row.document_id,
+       documentTitle: row.document_title,
+       documentSource: row.document_source,
+       documentSlug: row.document_slug,
+       chunkIndex: row.chunk_index,
+       content: row.content,
+       startLine: row.start_line,
+       endLine: row.end_line,
+       headingText: row.heading_text,
+       headingLevel: row.heading_level,
+       headingLineNumber: row.heading_line_number,
+       metadata: parseChunkMetadata(row.metadata),
+       similarity: Number(row.similarity)
+     }))
   } finally {
     await sql.end()
   }
-}
-
-/**
- * CLI entrypoint for ad-hoc retrieval debugging.
- * Reads a question from argv, fetches top similar chunks, and prints a
- * readable summary with similarity and source metadata.
- */
-async function main() {
-  const question = process.argv.slice(2).join(' ').trim()
-
-  if (!question) {
-    console.error('Usage: bun run semantic-search -- "your question here"')
-    process.exit(1)
-  }
-
-  const rows = await searchSimilarChunks({ question, topK: 5 })
-  const divider = '-'.repeat(72)
-
-  console.log(`\nTop ${rows.length} results for: "${question}"\n${divider}`)
-
-  rows.forEach((row, index) => {
-    const pct = (row.similarity * 100).toFixed(2)
-    const heading = row.headingText
-      ? ` › ${row.headingLevel ? '#'.repeat(row.headingLevel) + ' ' : ''}${row.headingText}`
-      : ''
-
-    console.log(`\n#${index + 1}  [similarity: ${pct}%]${heading}`)
-    console.log(`    Document : ${row.metadata.documentMetadata?.title ?? `Document ${row.documentId}`}`)
-    console.log(`    Source   : ${row.metadata.source ?? 'N/A'}`)
-    console.log(`    Chunk    : #${row.chunkIndex}  (id: ${row.id})`)
-    console.log(`\n Chunk content:    ${row.content.replace(/\n/g, '\n    ')}`)
-    console.log(`\n${divider}`)
-  })
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    console.error('There was an error while querying the db:', error)
-    process.exit(1)
-  })
 }
