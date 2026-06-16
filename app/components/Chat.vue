@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
+defineOptions({
+  name: 'MdnChat'
+})
+
+// Source objects attached to assistant answers. These mirror the server-side
+// shape so the UI can render citations, the context panel, and export links.
 interface ChatSource {
   id: string
   title: string
@@ -20,12 +26,6 @@ interface Message {
   sources?: ChatSource[]
 }
 
-interface ChatApiResponse {
-  answer: string
-  sources: ChatSource[]
-  usedContext: boolean
-}
-
 interface ChatHistoryMessage {
   role: 'user' | 'assistant'
   content: string
@@ -37,6 +37,13 @@ interface MessageSegment {
   language?: string
 }
 
+// Simplified browser-side representation of one parsed SSE message.
+interface ServerSentEventMessage {
+  event: string
+  data: string
+}
+
+// Main reactive chat state used by the page.
 const input = ref('')
 const isContextPanelOpen = ref(false)
 const isLoading = ref(false)
@@ -44,8 +51,14 @@ const requestError = ref('')
 const copiedCodeBlockKey = ref('')
 const messagesEndRef = ref<HTMLDivElement | null>(null)
 const messages = ref<Message[]>([])
+
+// Tracks the current in-flight request so we can abort it when the user clears
+// the chat or leaves the page.
+const activeRequestController = ref<AbortController | null>(null)
 const mdnBaseUrl = 'https://developer.mozilla.org'
 
+// The context sidebar always reflects the newest assistant message, which means
+// it updates naturally as soon as streamed sources arrive.
 const latestAiSources = computed<ChatSource[]>(() => {
   const latestAiMessage = [...messages.value].reverse().find(message => message.type === 'ai')
   return latestAiMessage?.sources ?? []
@@ -55,11 +68,16 @@ function createMessageId(prefix: 'user' | 'ai'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+// Convert the rendered conversation into the compact history payload expected
+// by the backend. Empty placeholders are filtered out so a half-streamed answer
+// is never echoed back into the next prompt.
 function toHistoryPayload(): ChatHistoryMessage[] {
-  return messages.value.map(message => ({
-    role: message.type === 'user' ? 'user' : 'assistant',
-    content: message.content
-  }))
+  return messages.value
+    .filter(message => message.content.trim().length > 0)
+    .map(message => ({
+      role: message.type === 'user' ? 'user' : 'assistant',
+      content: message.content
+    }))
 }
 
 async function scrollToBottom() {
@@ -78,7 +96,124 @@ function fillPrompt(value: string) {
   input.value = value
 }
 
+// Small message helpers keep the streaming update logic readable.
+function getMessageById(messageId: string): Message | undefined {
+  return messages.value.find(message => message.id === messageId)
+}
+
+function removeMessageById(messageId: string) {
+  messages.value = messages.value.filter(message => message.id !== messageId)
+}
+
+function updateMessageSources(messageId: string, sources: ChatSource[]) {
+  const message = getMessageById(messageId)
+  if (message) {
+    message.sources = sources
+  }
+}
+
+function appendMessageContent(messageId: string, contentChunk: string) {
+  const message = getMessageById(messageId)
+  if (message) {
+    message.content += contentChunk
+  }
+}
+
+function finalizeMessageContent(messageId: string, finalContent: string) {
+  const message = getMessageById(messageId)
+  if (message && !message.content.trim() && finalContent.trim()) {
+    message.content = finalContent
+  }
+}
+
+// Parse raw text read from the HTTP body into complete SSE events.
+// Because network chunks can split events arbitrarily, the trailing incomplete
+// fragment is returned as `remaining` and prepended to the next chunk.
+//
+// Why parse SSE manually instead of using the browser's EventSource API?
+// EventSource only supports GET requests and cannot send a JSON body, so it
+// cannot carry the message and history. We use a POST fetch stream instead,
+// which means we receive raw bytes and must parse the SSE framing ourselves.
+// The format we parse is our own stable contract defined in stream.post.ts,
+// not OpenAI's internal event schema — so this parser stays correct even if
+// the underlying LLM provider changes.
+function extractServerSentEvents(buffer: string): { events: ServerSentEventMessage[], remaining: string, } {
+  const blocks = buffer.split(/\r?\n\r?\n/)
+  const remaining = blocks.pop() ?? ''
+  const events: ServerSentEventMessage[] = []
+
+  for (const block of blocks) {
+    let event = 'message'
+    const dataLines: string[] = []
+
+    for (const line of block.split(/\r?\n/)) {
+      if (!line || line.startsWith(':')) {
+        continue
+      }
+
+      if (line.startsWith('event:')) {
+        event = line.slice(6).trim()
+        continue
+      }
+
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart())
+      }
+    }
+
+    if (dataLines.length > 0) {
+      events.push({
+        event,
+        data: dataLines.join('\n')
+      })
+    }
+  }
+
+  return { events, remaining }
+}
+
+// Apply one parsed SSE event to the assistant placeholder currently being
+// streamed into the chat transcript.
+async function handleStreamEvent(event: ServerSentEventMessage, assistantMessageId: string) {
+  const payload = JSON.parse(event.data) as {
+    answer?: string
+    message?: string
+    sources?: ChatSource[]
+    text?: string
+  }
+
+  if (event.event === 'sources') {
+    updateMessageSources(assistantMessageId, payload.sources ?? [])
+    await scrollToBottom()
+    return
+  }
+
+  if (event.event === 'delta') {
+    if (payload.text) {
+      appendMessageContent(assistantMessageId, payload.text)
+      await scrollToBottom()
+    }
+    return
+  }
+
+  if (event.event === 'done') {
+    finalizeMessageContent(assistantMessageId, payload.answer ?? '')
+    await scrollToBottom()
+    return
+  }
+
+  if (event.event === 'error') {
+    throw new Error(payload.message ?? 'Failed to get an answer from the assistant.')
+  }
+}
+
+// Lightweight renderer that recognizes fenced code blocks in assistant output
+// and splits them into plain-text and code segments for display.
 function parseMessageSegments(content: string): MessageSegment[] {
+  if (!content) {
+    return []
+  }
+
   const codeBlockRegex = /```([\w-]+)?\n([\s\S]*?)```/g
   const segments: MessageSegment[] = []
   let cursor = 0
@@ -113,6 +248,7 @@ function parseMessageSegments(content: string): MessageSegment[] {
   return segments
 }
 
+// Copy helper for rendered code blocks.
 async function copyCodeToClipboard(code: string, key: string) {
   try {
     await navigator.clipboard.writeText(code)
@@ -127,6 +263,8 @@ async function copyCodeToClipboard(code: string, key: string) {
   }
 }
 
+// Reconstruct an MDN anchor from the heading text when we have enough source
+// metadata to produce a direct deep link.
 function slugifyHeading(heading: string): string {
   // Convert heading to MDN-style anchor: lowercase, spaces to underscores
   return heading
@@ -177,6 +315,7 @@ function normalizeSourceUrl(rawUrl: string): string {
   return `${mdnBaseUrl}/en-US/docs/${normalizedPath}`
 }
 
+// Centralized link-building logic shared by the template and the export flow.
 function getSourceHref(source: ChatSource): string {
   // Centralized so template/export always share identical link logic.
 
@@ -195,14 +334,24 @@ function getSourceHref(source: ChatSource): string {
   return normalizeSourceUrl(source.url)
 }
 
+// Main submit flow for the streaming chat UI.
+// Sequence:
+// 1) snapshot existing history,
+// 2) add the user's message,
+// 3) add an empty assistant placeholder,
+// 4) open the streaming endpoint,
+// 5) incrementally apply SSE events to the placeholder.
 async function handleSubmit() {
   const question = input.value.trim()
   if (!question || isLoading.value) {
     return
   }
 
+  const history = toHistoryPayload()
   requestError.value = ''
   input.value = ''
+
+  const assistantMessageId = createMessageId('ai')
 
   messages.value.push({
     id: createMessageId('user'),
@@ -211,31 +360,97 @@ async function handleSubmit() {
     timestamp: new Date()
   })
 
+  messages.value.push({
+    id: assistantMessageId,
+    type: 'ai',
+    content: '',
+    timestamp: new Date(),
+    sources: []
+  })
+
   isLoading.value = true
+  const abortController = new AbortController()
+  activeRequestController.value = abortController
 
   try {
-    const response = await $fetch<ChatApiResponse>('/api/chat', {
+    // Native fetch is required here because we need direct access to the
+    // streaming response body. `$fetch` resolves only after completion.
+    const response = await fetch('/api/chat/stream', {
       method: 'POST',
-      body: {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
+      body: JSON.stringify({
         message: question,
-        history: toHistoryPayload()
-      }
+        history
+      }),
+      signal: abortController.signal
     })
 
-    messages.value.push({
-      id: createMessageId('ai'),
-      type: 'ai',
-      content: response.answer,
-      timestamp: new Date(),
-      sources: response.sources
-    })
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(errorText || 'Failed to open the streaming response.')
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable in this browser.')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    // Read arbitrary network chunks, append them to the buffer, parse all full
+    // SSE messages found so far, and keep any incomplete tail for the next read.
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const parsed = extractServerSentEvents(buffer)
+      buffer = parsed.remaining
+
+      for (const event of parsed.events) {
+        await handleStreamEvent(event, assistantMessageId)
+      }
+    }
+
+    // Flush any remaining decoder state once the stream ends.
+    buffer += decoder.decode()
+    if (buffer.trim()) {
+      const trailingEvents = extractServerSentEvents(`${buffer}\n\n`).events
+      for (const event of trailingEvents) {
+        await handleStreamEvent(event, assistantMessageId)
+      }
+    }
   } catch (error) {
+    // Abort is an expected control-flow path when the user clears the chat or
+    // navigates away, so we do not surface it as a failure.
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return
+    }
+
+    // If nothing was streamed yet, remove the placeholder bubble so the chat
+    // does not keep an empty assistant message around after errors.
+    if (!getMessageById(assistantMessageId)?.content.trim()) {
+      removeMessageById(assistantMessageId)
+    }
+
     requestError.value = error instanceof Error ? error.message : 'Failed to get an answer from the assistant.'
   } finally {
+    // Only clear the controller if this request is still the active one.
+    if (activeRequestController.value === abortController) {
+      activeRequestController.value = null
+    }
+
     isLoading.value = false
   }
 }
 
+// Enter submits; Shift+Enter inserts a newline.
 function handleKeyDown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -243,11 +458,21 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+// Clearing the transcript also aborts any in-flight stream so the server does
+// not continue producing tokens for a conversation the user discarded.
 function clearChat() {
+  activeRequestController.value?.abort()
   messages.value = []
   requestError.value = ''
 }
 
+// Defensive cleanup when leaving the page.
+onBeforeUnmount(() => {
+  activeRequestController.value?.abort()
+})
+
+// Export the current conversation to markdown, including source links for each
+// assistant message so the transcript remains traceable outside the app.
 function exportChat() {
   if (messages.value.length === 0) {
     return
@@ -378,6 +603,12 @@ function exportChat() {
               <span>{{ message.timestamp.toLocaleTimeString() }}</span>
             </div>
             <div class="space-y-3">
+              <p
+                v-if="message.type === 'ai' && !message.content && isLoading"
+                class="text-sm italic text-gray-400"
+              >
+                Streaming answer...
+              </p>
               <template
                 v-for="(segment, segmentIndex) in parseMessageSegments(message.content)"
                 :key="`${message.id}-${segmentIndex}`"
@@ -419,11 +650,20 @@ function exportChat() {
                 :key="`${message.id}-${source.id}`"
                 class="rounded-lg bg-[#111122] p-3"
               >
-                <p class="text-sm text-gray-100 hover:text-gray-400" v-if="getSourceHref(source)">
-                  <a :href="getSourceHref(source)" target="_blank"
-                  rel="noopener noreferrer">[Source {{ index + 1 }}] {{ source.title }}</a>
+                <p
+                  v-if="getSourceHref(source)"
+                  class="text-sm text-gray-100 hover:text-gray-400"
+                >
+                  <a
+                    :href="getSourceHref(source)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >[Source {{ index + 1 }}] {{ source.title }}</a>
                 </p>
-                <p class="text-sm text-gray-100" v-else>
+                <p
+                  v-else
+                  class="text-sm text-gray-100"
+                >
                   [Source {{ index + 1 }}] {{ source.title }}
                 </p>
                 <p class="text-xs text-gray-400">
@@ -442,12 +682,6 @@ function exportChat() {
           </article>
         </template>
 
-        <div
-          v-if="isLoading"
-          class="text-sm text-gray-400"
-        >
-          Assistant is thinking...
-        </div>
         <div
           v-if="requestError"
           class="rounded-lg border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-200"
