@@ -111,5 +111,27 @@ bun run dev
    The endpoint runs semantic retrieval + threshold filtering + grounded OpenAI answering,
    and returns both answer text and retrieved sources for the context panel.
 
+## Evaluation (Promptfoo)
+
+Use the deterministic retrieval evaluation under `evaluation/retrieval-eval-deterministic/`.
+
+1. Run from the evaluation folder:
+
+   ```bash
+   cd evaluation/retrieval-eval-deterministic
+   npx promptfoo@latest eval --env-file ./../../.env
+   ```
+
+2. If `npx` is unavailable in your shell, use:
+
+   ```bash
+   bunx promptfoo@latest eval --env-file ./../../.env
+   ```
+
+3. The custom provider is `retrieval-provider.ts`. It:
+   - checks cache for the same prompt
+   - calls semantic retrieval via `searchSimilarChunks({ question: prompt, topK: 5 })`
+   - returns the retrieved chunks as provider output
+   - caches the result for 1 hour
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
