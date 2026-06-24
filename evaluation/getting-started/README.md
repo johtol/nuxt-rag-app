@@ -1,42 +1,21 @@
-# getting-started (Getting Started Example)
+# getting-started evaluation
 
-You can run this example with:
+Basic Promptfoo example to validate local evaluation wiring.
 
-```bash
-npx promptfoo@latest init --example getting-started
-cd getting-started
-```
+## What it tests
 
-This is a simple example that demonstrates the basic functionality of promptfoo. It tests two different translation prompts across multiple language models.
+- Two translation prompt templates
+- Two OpenAI providers (`gpt-5.5`, `gpt-5.4-mini`)
+- Deterministic assertions (`contains`, `icontains`)
 
-## Setup
+## Run
 
-1. Set your OpenAI API key:
-
-```bash
-export OPENAI_API_KEY=your-key-here
-```
-
-_Tip: you can also put this key in a `.env` file. Be sure not to commit it to git._
-
-2. Run the evaluation:
+From repository root:
 
 ```bash
-promptfoo eval
+promptfoo eval -c evaluation/getting-started/promptfooconfig.yaml
 ```
 
-## What's happening?
+## Requirements
 
-This example:
-
-- Tests two different ways to phrase a translation prompt
-- Compares outputs between GPT-5.2 and GPT-5 Mini
-- Uses two test cases with different languages and inputs
-
-The configuration in `promptfooconfig.yaml` shows:
-
-- How to define prompts with variables using `{{variable_name}}`
-- How to specify multiple providers (models)
-- How to set up test cases with different variable values
-
-This is the same example shown in the Getting Started guide at https://promptfoo.dev/docs/getting-started
+- `OPENAI_API_KEY` set in your environment

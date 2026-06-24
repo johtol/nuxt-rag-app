@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Evaluation of the retrieval system'
+# Optionally set API keys here instead of exporting environment variables.
+# Never commit real keys to source control.
+# env:
+#   OPENAI_API_KEY: sk-...
+# setting up initial prompt, which is the query provided as the var below.
+prompts:
+  - '{{query}}'
+
+# We add a custom provider which retrieves relevant chunks from the documentation based on the query and returns them as context to the prompt. This allows us to test if the retrieval system is correctly fetching the relevant information for a given query.
+providers:
+  - file://provider.ts
+  # Or setup models from other providers
+  # - anthropic:messages:claude-sonnet-4-6
+  # - google:gemini-3.1-pro-preview
+
+# Test definitions
+tests:
+  - vars:
+      query: What prereqs should I have before studying JavaScript?
+    # deterministic part checking if the chunks pop up when the user asks the query.
+    assert:
+      - type: context-faithfulness
+        # transforming is required  to get the actual output answer and context, because the provider does not return a
+        # string, but an object.
+        transform: "output.answer"
+        contextTransform: "output.context"
+        value: | 
+          - A general understanding of the Internet and the World Wide Web (WWW)
+          - Good working knowledge of HyperText Markup Language (HTML)
+          - Some programming experience.
+        threshold: 0.9 # Require 90% of claims to be supported
+  # Always links to the provided context. It checks deterministically whether the generated answer to the prompt contain this URL
+  - vars:
+      query: What the example used in the MDN docs to demonstrate how to declare a variable?
+    assert:
+      - type: contains
+        # transforming is required  to get the actual output answer and context, because the provider does not return a
+        # string, but an object.
+        transform: "output.answer"
+        contextTransform: "output.context"
+        value: https://developer.mozilla.org/en-US/docs/Web/Javascript/Guide/Grammar_and_types
