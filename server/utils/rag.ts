@@ -1,4 +1,10 @@
-import { searchSimilarChunks, type SimilarChunk } from '../../scripts/semantic-search'
+import type { SimilarChunk } from '../../scripts/semantic-search'
+import {
+  createOpenAiResponse,
+  getAnswerFromOpenAI,
+  getRagRuntimeConfig,
+  prepareRagPrompt
+} from '../../scripts/rag-core'
 
 // Minimal message shape that the server accepts from the chat UI.
 // We keep only role + content because that is all the RAG prompt needs
@@ -46,18 +52,6 @@ export interface StreamRagAnswerHandlers {
   onDone?: (answer: string) => void | Promise<void>,
 }
 
-// Small helper type matching the Responses API input_text block format.
-interface OpenAIInputText {
-  type: 'input_text'
-  text: string
-}
-
-// Shape used by the non-streaming JSON response path.
-interface OpenAIResponsePayload {
-  output_text?: string
-  output?: Array<{ content?: Array<{ text?: string }> }>
-}
-
 // Shared result of the retrieval + prompt-building phase.
 // Both streaming and non-streaming paths use this so they stay consistent.
 interface PreparedRagRequest {
@@ -81,130 +75,6 @@ interface OpenAiResponseStreamEvent {
   message?: string
 }
 
-// System instructions for the model. We centralize this string so both the
-// non-streaming and streaming code paths apply the exact same answering rules.
-const ragSystemPolicy = [
-  'You are an MDN documentation assistant that answers with retrieved context only.',
-  'Use only the provided XML context and conversation history to answer.',
-  'If the answer is not in the context, clearly say what is missing.',
-  'Keep the answer concise and practical for developers.',
-  'When making factual claims, cite supporting chunks as [Source N].',
-  'Use markdown formatting for readability.'
-].join(' ')
-
-// The prompt is assembled as XML. Because document chunks and headings can
-// contain arbitrary text, we must escape reserved XML characters first.
-function escapeXml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('\'', '&apos;')
-}
-
-// Serialize retrieved chunks into a structured XML block. This makes the prompt
-// explicit and predictable for the model: each chunk has a title, section,
-// similarity score, source URL, and content body.
-function buildXmlContext(chunks: SimilarChunk[]): string {
-  const documentsXml = chunks
-    .map((chunk, index) => {
-      // Prefer canonical document values from relational fields, then metadata fallback.
-      const title = chunk.documentTitle ?? chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`
-      const section = chunk.headingText ?? 'No heading'
-      const sourceUrl = chunk.documentSource ?? chunk.metadata.source ?? 'N/A'
-      const similarityPct = (chunk.similarity * 100).toFixed(2)
-
-      return [
-        `  <document index="${index + 1}">`,
-        `    <chunk_id>${escapeXml(chunk.id)}</chunk_id>`,
-        `    <chunk_index>${chunk.chunkIndex}</chunk_index>`,
-        `    <title>${escapeXml(title)}</title>`,
-        `    <section>${escapeXml(section)}</section>`,
-        `    <similarity score="${chunk.similarity.toFixed(6)}">${similarityPct}%</similarity>`,
-        `    <source_url>${escapeXml(sourceUrl)}</source_url>`,
-        `    <content>${escapeXml(chunk.content)}</content>`,
-        '  </document>'
-      ].join('\n')
-    })
-    .join('\n')
-
-  return `<documents>\n${documentsXml}\n</documents>`
-}
-
-// Serialize the last few turns of the conversation so the model can answer
-// follow-up questions without losing the immediate thread of the discussion.
-// We intentionally cap the number of turns to avoid unbounded prompt growth.
-function buildHistoryXml(history: ChatHistoryMessage[]): string {
-  if (history.length === 0) {
-    return '<conversation_history />'
-  }
-
-  const historyXml = history
-    // Keep recent turns only so prompt size stays bounded.
-    .slice(-8)
-    .map((turn) => {
-      return `  <turn role="${turn.role}">${escapeXml(turn.content)}</turn>`
-    })
-    .join('\n')
-
-  return `<conversation_history>\n${historyXml}\n</conversation_history>`
-}
-
-// Read and validate all runtime configuration used by the RAG pipeline.
-// Keeping this in one place ensures the streaming and non-streaming flows
-// behave the same way and fail with the same validation rules.
-function getRagConfig() {
-  const topK = Number(process.env.RAG_TOP_K ?? 5)
-  const minSimilarity = Number(process.env.RAG_MIN_SIMILARITY ?? 0.6)
-  const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini'
-  const openAiApiKey = process.env.OPENAI_API_KEY
-
-  if (!openAiApiKey) {
-    throw new Error('OPENAI_API_KEY is not set')
-  }
-
-  if (!Number.isFinite(topK) || topK < 1) {
-    throw new Error('RAG_TOP_K must be a positive number')
-  }
-
-  if (!Number.isFinite(minSimilarity) || minSimilarity < 0 || minSimilarity > 1) {
-    throw new Error('RAG_MIN_SIMILARITY must be a number between 0 and 1')
-  }
-
-  return {
-    topK,
-    minSimilarity,
-    openAiModel,
-    openAiApiKey
-  }
-}
-
-// Build the OpenAI Responses API input array. We use a system message for
-// grounding rules and a user message containing the composed RAG prompt.
-function buildOpenAiInput(prompt: string) {
-  const systemPrompt: OpenAIInputText = {
-    type: 'input_text',
-    text: ragSystemPolicy
-  }
-
-  const userPrompt: OpenAIInputText = {
-    type: 'input_text',
-    text: prompt
-  }
-
-  return [
-    {
-      role: 'system',
-      content: [systemPrompt]
-    },
-    {
-      role: 'user',
-      content: [userPrompt]
-    }
-  ]
-}
-
 // Shared preparation step:
 // 1) validate the question,
 // 2) load configuration,
@@ -215,87 +85,33 @@ function buildOpenAiInput(prompt: string) {
 // This is the most important refactor for streaming because the frontend wants
 // sources immediately, before model generation has completed.
 async function prepareRagRequest(options: GenerateRagAnswerOptions): Promise<PreparedRagRequest> {
-  const question = options.question.trim()
-  if (!question) {
-    throw new Error('Question is required')
-  }
+  const ragConfig = getRagRuntimeConfig()
+  const preparedPrompt = await prepareRagPrompt({
+    question: options.question,
+    history: options.history,
+    topK: ragConfig.topK,
+    minSimilarity: ragConfig.minSimilarity
+  })
 
-  const { topK, minSimilarity, openAiModel, openAiApiKey } = getRagConfig()
-  const retrievedChunks = await searchSimilarChunks({ question, topK })
-  const filteredChunks = retrievedChunks.filter(chunk => chunk.similarity >= minSimilarity)
-
-  if (filteredChunks.length === 0) {
+  if (preparedPrompt.filteredChunks.length === 0) {
     return {
       prompt: null,
       sources: [],
       usedContext: false,
-      fallbackAnswer: `I couldn't find sufficiently relevant MDN context for that question (threshold: ${minSimilarity}). Try rephrasing with more specific terms.`,
-      openAiModel,
-      openAiApiKey
+      fallbackAnswer: `I couldn't find sufficiently relevant MDN context for that question (threshold: ${ragConfig.minSimilarity}). Try rephrasing with more specific terms.`,
+      openAiModel: ragConfig.openAiModel,
+      openAiApiKey: ragConfig.openAiApiKey
     }
   }
 
   return {
-    prompt: [
-      `<question>${escapeXml(question)}</question>`,
-      buildHistoryXml(options.history ?? []),
-      buildXmlContext(filteredChunks)
-    ].join('\n\n'),
-    sources: mapSources(filteredChunks),
+    prompt: preparedPrompt.prompt,
+    sources: mapSources(preparedPrompt.filteredChunks),
     usedContext: true,
     fallbackAnswer: null,
-    openAiModel,
-    openAiApiKey
+    openAiModel: ragConfig.openAiModel,
+    openAiApiKey: ragConfig.openAiApiKey
   }
-}
-
-// Low-level helper that sends a request to OpenAI. The `stream` flag lets both
-// code paths share the same request construction while differing only in how the
-// response body is consumed.
-async function createOpenAiResponse(
-  prompt: string,
-  openAiModel: string,
-  openAiApiKey: string,
-  options?: {
-    stream?: boolean
-    signal?: AbortSignal
-  }
-): Promise<Response> {
-  return await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${openAiApiKey}`
-    },
-    signal: options?.signal,
-    body: JSON.stringify({
-      model: openAiModel,
-      temperature: 0.2,
-      stream: options?.stream ?? false,
-      input: buildOpenAiInput(prompt)
-    })
-  })
-}
-
-// Non-streaming answer generation used by the legacy JSON route.
-// We wait for the full response payload, extract the plain-text answer, and
-// return it once the model has completely finished.
-async function getAnswerFromOpenAI(prompt: string, openAiModel: string, openAiApiKey: string): Promise<string> {
-  const response = await createOpenAiResponse(prompt, openAiModel, openAiApiKey)
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`OpenAI error (${response.status}): ${errorText}`)
-  }
-
-  const payload = (await response.json()) as OpenAIResponsePayload
-  const answer = payload.output_text?.trim() ?? payload.output?.[0]?.content?.[0]?.text?.trim()
-
-  if (!answer) {
-    throw new Error('OpenAI response did not include output text')
-  }
-
-  return answer
 }
 
 // Convert raw retrieved chunks into the smaller UI-friendly source objects.
@@ -325,7 +141,9 @@ async function streamAnswerFromOpenAI(
   handlers: Pick<StreamRagAnswerHandlers, 'onDelta'>,
   signal?: AbortSignal
 ): Promise<string> {
-  const response = await createOpenAiResponse(prompt, openAiModel, openAiApiKey, {
+  const response = await createOpenAiResponse(prompt, {
+    model: openAiModel,
+    apiKey: openAiApiKey,
     stream: true,
     signal
   })
@@ -425,8 +243,10 @@ export async function generateRagAnswer(options: GenerateRagAnswerOptions): Prom
 
   const answer = await getAnswerFromOpenAI(
     preparedRequest.prompt,
-    preparedRequest.openAiModel,
-    preparedRequest.openAiApiKey
+    {
+      model: preparedRequest.openAiModel,
+      apiKey: preparedRequest.openAiApiKey
+    }
   )
 
   return {
