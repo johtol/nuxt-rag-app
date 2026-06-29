@@ -29,6 +29,13 @@
       "when": 1781187444743,
       "tag": "0003_colorful_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782744182055,
+      "tag": "0004_hybrid_bm25",
+      "breakpoints": true
     }
   ]
 }

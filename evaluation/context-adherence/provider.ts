@@ -24,6 +24,10 @@ export default class RagFaithfulnessProvider implements ApiProvider {
       question,
       topK: Number(process.env.RAG_TOP_K ?? 5),
       minSimilarity: Number(process.env.RAG_MIN_SIMILARITY ?? 0.6),
+      retrievalMode: (process.env.RAG_RETRIEVAL_MODE ?? 'semantic').trim().toLowerCase() === 'hybrid' ? 'hybrid' : 'semantic',
+      hybridRrfK: Number(process.env.RAG_HYBRID_RRF_K ?? 60),
+      hybridVectorCandidateK: Number(process.env.RAG_HYBRID_VECTOR_CANDIDATES ?? 20),
+      hybridBm25CandidateK: Number(process.env.RAG_HYBRID_BM25_CANDIDATES ?? 20),
       model: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini'
     })
 

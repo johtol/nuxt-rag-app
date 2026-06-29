@@ -115,9 +115,15 @@ bun run db:seed
 
 ### `semantic-search.ts`
 
-Runs a standalone semantic similarity search against the indexed chunks.
+Runs a standalone retrieval search against the indexed chunks.
 
-Embeds the query using Voyage AI, then queries the `chunks` table via pgvector's cosine similarity (`<=>`). Prints a formatted list of the top matching chunks with similarity score, document, source, heading, and content.
+Embeds the query using Voyage AI, then retrieves chunks using either:
+- semantic vector search (`RAG_RETRIEVAL_MODE=semantic`, default), or
+- hybrid BM25 + vector retrieval with RRF fusion (`RAG_RETRIEVAL_MODE=hybrid`).
+
+Prints a formatted list of top matching chunks with score, document, source, heading, and content.
+
+> Hybrid mode requires running `bun run db:migrate` so the BM25 `search_vector` column/index exists.
 
 **Run:**
 
@@ -127,9 +133,13 @@ bun run semantic-search -- "your question here"
 
 **Options:**
 
-| Variable        | Default | Description                                     |
-| --------------- | ------- | ----------------------------------------------- |
-| `RAG_TOP_K`     | `5`     | Number of top results to retrieve from pgvector |
+| Variable                        | Default    | Description                                   |
+| ------------------------------- | ---------- | --------------------------------------------- |
+| `RAG_TOP_K`                     | `5`        | Number of top results to retrieve             |
+| `RAG_RETRIEVAL_MODE`            | `semantic` | Retrieval mode: `semantic` or `hybrid`        |
+| `RAG_HYBRID_RRF_K`              | `60`       | RRF constant used when hybrid mode is enabled |
+| `RAG_HYBRID_VECTOR_CANDIDATES`  | `20`       | Vector candidates considered before fusion    |
+| `RAG_HYBRID_BM25_CANDIDATES`    | `20`       | BM25 candidates considered before fusion      |
 
 **Environment variables:**
 
@@ -177,8 +187,12 @@ bun run rag:ask -- "your question here"
 | Variable             | Default       | Description                                              |
 | -------------------- | ------------- | -------------------------------------------------------- |
 | `OPENAI_MODEL`       | `gpt-4.1-mini`| OpenAI model to use for answer generation                |
-| `RAG_TOP_K`          | `5`           | Number of chunks fetched from pgvector before filtering  |
-| `RAG_MIN_SIMILARITY` | `0.6`         | Minimum similarity score (0–1) to pass a chunk to the LLM |
+| `RAG_TOP_K`                   | `5`           | Number of chunks fetched before filtering                  |
+| `RAG_MIN_SIMILARITY`          | `0.6`         | Minimum score (0–1) to pass a chunk to the LLM            |
+| `RAG_RETRIEVAL_MODE`          | `semantic`    | Retrieval mode: `semantic` or `hybrid`                    |
+| `RAG_HYBRID_RRF_K`            | `60`          | RRF constant used when hybrid mode is enabled             |
+| `RAG_HYBRID_VECTOR_CANDIDATES`| `20`          | Vector candidates considered before hybrid fusion          |
+| `RAG_HYBRID_BM25_CANDIDATES`  | `20`          | BM25 candidates considered before hybrid fusion            |
 
 **Environment variables:**
 
@@ -258,4 +272,3 @@ console.log(meta.documentMetadata?.title)
 | `ChunkMetadata`            | Typed representation of per-chunk metadata        |
 | `ChunkDocumentMetadata`    | Nested document-level metadata (title, etc.)      |
 | `SearchSimilarChunksOptions` | Options accepted by `searchSimilarChunks`       |
-

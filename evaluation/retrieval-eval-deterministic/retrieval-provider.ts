@@ -17,7 +17,19 @@ export default class RetrievalProvider implements ApiProvider {
     if (cachedResult) return cachedResult
 
     // 3) Run semantic retrieval with the expected options object shape.
-    const results = await searchSimilarChunks({ question: prompt, topK: 5 })
+    const retrievalMode = (process.env.RAG_RETRIEVAL_MODE ?? 'semantic').trim().toLowerCase() === 'hybrid'
+      ? 'hybrid'
+      : 'semantic'
+    const results = await searchSimilarChunks({
+      question: prompt,
+      topK: 5,
+      retrievalMode,
+      hybrid: {
+        rrfK: Number(process.env.RAG_HYBRID_RRF_K ?? 60),
+        vectorCandidateK: Number(process.env.RAG_HYBRID_VECTOR_CANDIDATES ?? 20),
+        bm25CandidateK: Number(process.env.RAG_HYBRID_BM25_CANDIDATES ?? 20)
+      }
+    })
 
     // 4) Return the retrieved chunks in promptfoo's ProviderResponse format.
     const formattedResult: ProviderResponse = { output: results }

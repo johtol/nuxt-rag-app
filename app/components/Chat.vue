@@ -15,6 +15,11 @@ interface ChatSource {
   slug: string | null
   headingText: string | null
   similarity: number
+  scoreBreakdown?: {
+    vectorSimilarity: number | null
+    bm25Score: number | null
+    hybridScore: number | null
+  }
   section: string
 }
 
@@ -105,10 +110,35 @@ function removeMessageById(messageId: string) {
   messages.value = messages.value.filter(message => message.id !== messageId)
 }
 
+function normalizeSourceScores(source: ChatSource): ChatSource {
+  const scoreBreakdown = source.scoreBreakdown ?? {
+    vectorSimilarity: null,
+    bm25Score: null,
+    hybridScore: null
+  }
+
+  return {
+    ...source,
+    scoreBreakdown: {
+      vectorSimilarity: scoreBreakdown.vectorSimilarity,
+      bm25Score: scoreBreakdown.bm25Score,
+      hybridScore: scoreBreakdown.hybridScore ?? source.similarity
+    }
+  }
+}
+
 function updateMessageSources(messageId: string, sources: ChatSource[]) {
   const message = getMessageById(messageId)
   if (message) {
-    message.sources = sources
+    message.sources = sources.map(normalizeSourceScores)
+    console.log(
+      '[chat:sources] bm25',
+      message.sources.map(source => ({
+        id: source.id,
+        title: source.title,
+        bm25Score: source.scoreBreakdown?.bm25Score ?? null
+      }))
+    )
   }
 }
 
@@ -492,6 +522,7 @@ function exportChat() {
     lines.push('')
 
     if (message.sources && message.sources.length > 0) {
+      console.log("Message sources: ", message.sources)
       lines.push('Sources:')
       message.sources.forEach((source, index) => {
         // Export canonical URL so shared transcripts keep valid links.
@@ -741,6 +772,7 @@ function exportChat() {
         v-else
         class="space-y-3"
       >
+        {{ latestAiSources.map(source => source.scoreBreakdown) }}
         <article
           v-for="(source, index) in latestAiSources"
           :key="`${source.id}-${index}`"
@@ -751,6 +783,9 @@ function exportChat() {
           </p>
           <p class="text-xs text-gray-400 mb-2">
             {{ source.section }} · {{ Math.round(source.similarity * 100) }}%
+          </p>
+          <p class="text-xs text-gray-500 mb-2">
+            BM25: {{ source.scoreBreakdown?.bm25Score  }}
           </p>
           <p class="text-sm text-gray-300 line-clamp-5">
             {{ source.content }}

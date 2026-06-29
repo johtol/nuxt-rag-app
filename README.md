@@ -94,12 +94,18 @@ bun run dev
     bun run semantic-search -- "Your search query here"
     ```
 
-7. **RAG Query**: Query the LLM using the retrieved semantically similar chunks as context:
+7. **RAG Query**: Query the LLM using retrieved chunks as context:
     ```bash
     bun run rag:ask -- "What is a JavaScript closure?"
     ```
    
-    The retrieval flow first gets top-K chunks by vector similarity, then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM. Retrieved chunks are serialized into XML tags (`document`, `title`, `section`, `similarity`, `source_url`, `content`) before prompting the model.
+    The retrieval flow gets top-K chunks (semantic by default, optional hybrid BM25+vector via `RAG_RETRIEVAL_MODE=hybrid`), then applies `RAG_MIN_SIMILARITY` so only relevant chunks are sent to the LLM. Retrieved chunks are serialized into XML tags (`document`, `title`, `section`, `similarity`, `source_url`, `content`) before prompting the model.
+
+    Hybrid retrieval knobs:
+    - `RAG_RETRIEVAL_MODE=semantic|hybrid` (default: `semantic`)
+    - `RAG_HYBRID_RRF_K` (default: `60`)
+    - `RAG_HYBRID_VECTOR_CANDIDATES` (default: `20`)
+    - `RAG_HYBRID_BM25_CANDIDATES` (default: `20`)
 
 8. **MDN Chat UI (connected to RAG backend)**: Start Nuxt and chat from the browser.
 
@@ -108,7 +114,7 @@ bun run dev
    ```
 
    Open `http://localhost:3000`, ask a question, and the app will call `POST /api/chat`.
-   The endpoint runs semantic retrieval + threshold filtering + grounded OpenAI answering,
+   The endpoint runs retrieval + threshold filtering + grounded OpenAI answering,
    and returns both answer text and retrieved sources for the context panel.
 
 ## Evaluation (Promptfoo)
@@ -130,7 +136,7 @@ Use the deterministic retrieval evaluation under `evaluation/retrieval-eval-dete
 
 3. The custom provider is `retrieval-provider.ts`. It:
    - checks cache for the same prompt
-   - calls semantic retrieval via `searchSimilarChunks({ question: prompt, topK: 5 })`
+   - calls retrieval via `searchSimilarChunks({ question: prompt, topK: 5 })`
    - returns the retrieved chunks as provider output
    - caches the result for 1 hour
 

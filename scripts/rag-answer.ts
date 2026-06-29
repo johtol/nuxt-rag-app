@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import type { RetrievalMode } from './semantic-search.ts'
 import {
   getAnswerFromOpenAI,
   getRagRuntimeConfig,
@@ -13,6 +14,10 @@ export interface RunRagAnswerOptions {
   question: string
   topK?: number
   minSimilarity?: number
+  retrievalMode?: RetrievalMode
+  hybridRrfK?: number
+  hybridVectorCandidateK?: number
+  hybridBm25CandidateK?: number
   model?: string
   apiKey?: string
 }
@@ -34,13 +39,19 @@ export async function runRagAnswer(options: RunRagAnswerOptions): Promise<RunRag
   const ragConfig = getRagRuntimeConfig({
     topK: options.topK,
     minSimilarity: options.minSimilarity,
+    retrievalMode: options.retrievalMode,
+    hybridRrfK: options.hybridRrfK,
+    hybridVectorCandidateK: options.hybridVectorCandidateK,
+    hybridBm25CandidateK: options.hybridBm25CandidateK,
     model: options.model,
     apiKey: options.apiKey
   })
   const prepared = await prepareRagPrompt({
     question: options.question,
     topK: ragConfig.topK,
-    minSimilarity: ragConfig.minSimilarity
+    minSimilarity: ragConfig.minSimilarity,
+    retrievalMode: ragConfig.retrievalMode,
+    hybrid: ragConfig.hybrid
   })
 
   if (prepared.retrievedChunks.length === 0) {

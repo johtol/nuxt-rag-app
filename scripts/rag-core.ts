@@ -1,4 +1,4 @@
-import { searchSimilarChunks, type SimilarChunk } from './semantic-search.ts'
+import { searchSimilarChunks, type HybridSearchOptions, type RetrievalMode, type SimilarChunk } from './semantic-search.ts'
 
 export interface RagHistoryMessage {
   role: 'user' | 'assistant'
@@ -18,6 +18,10 @@ interface OpenAIResponsePayload {
 export interface RagRuntimeConfigOptions {
   topK?: number
   minSimilarity?: number
+  retrievalMode?: RetrievalMode
+  hybridRrfK?: number
+  hybridVectorCandidateK?: number
+  hybridBm25CandidateK?: number
   model?: string
   apiKey?: string
 }
@@ -25,6 +29,8 @@ export interface RagRuntimeConfigOptions {
 export interface RagRuntimeConfig {
   topK: number
   minSimilarity: number
+  retrievalMode: RetrievalMode
+  hybrid: Required<HybridSearchOptions>
   openAiModel: string
   openAiApiKey: string
 }
@@ -33,6 +39,8 @@ export interface PrepareRagPromptOptions {
   question: string
   topK: number
   minSimilarity: number
+  retrievalMode: RetrievalMode
+  hybrid: Required<HybridSearchOptions>
   history?: RagHistoryMessage[]
 }
 
@@ -45,7 +53,8 @@ export interface PrepareRagPromptResult {
 }
 
 const DEFAULT_TOP_K = Number(process.env.RAG_TOP_K ?? 5)
-const DEFAULT_MIN_SIMILARITY = Number(process.env.RAG_MIN_SIMILARITY ?? 0.6)
+const DEFAULT_MIN_SIMILARITY = Number(process.env.RAG_MIN_SIMILARITY ?? 0.7)
+const DEFAULT_HYBRID_RRF_K = Number(process.env.RAG_HYBRID_RRF_K ?? 60)
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini'
 
 export const defaultRagSystemPolicy = [
@@ -55,13 +64,17 @@ export const defaultRagSystemPolicy = [
   'Keep the answer concise and practical for developers.',
   'When making factual claims, cite supporting chunks as [Source N].',
   'Use markdown formatting for readability.',
-  'Stick to the provided context as closely as possible and do NOT add any other information',
+  'Stick to the provided context as closely as possible and do NOT add any other information'
   // 'Always include a link to referenced context document (it is a url)'
 ].join(' ')
 
 export function getRagRuntimeConfig(options: RagRuntimeConfigOptions = {}): RagRuntimeConfig {
   const topK = options.topK ?? DEFAULT_TOP_K
   const minSimilarity = options.minSimilarity ?? DEFAULT_MIN_SIMILARITY
+  const retrievalMode = (options.retrievalMode ?? process.env.RAG_RETRIEVAL_MODE ?? 'semantic').trim().toLowerCase()
+  const hybridRrfK = options.hybridRrfK ?? DEFAULT_HYBRID_RRF_K
+  const hybridVectorCandidateK = options.hybridVectorCandidateK ?? Number(process.env.RAG_HYBRID_VECTOR_CANDIDATES ?? Math.max(topK, topK * 4))
+  const hybridBm25CandidateK = options.hybridBm25CandidateK ?? Number(process.env.RAG_HYBRID_BM25_CANDIDATES ?? Math.max(topK, topK * 4))
   const openAiModel = options.model ?? DEFAULT_OPENAI_MODEL
   const openAiApiKey = options.apiKey ?? process.env.OPENAI_API_KEY
 
@@ -77,9 +90,31 @@ export function getRagRuntimeConfig(options: RagRuntimeConfigOptions = {}): RagR
     throw new Error('RAG_MIN_SIMILARITY must be a number between 0 and 1')
   }
 
+  if (retrievalMode !== 'semantic' && retrievalMode !== 'hybrid') {
+    throw new Error('RAG_RETRIEVAL_MODE must be either "semantic" or "hybrid"')
+  }
+
+  if (!Number.isFinite(hybridRrfK) || hybridRrfK <= 0) {
+    throw new Error('RAG_HYBRID_RRF_K must be a positive number')
+  }
+
+  if (!Number.isFinite(hybridVectorCandidateK) || hybridVectorCandidateK <= 0) {
+    throw new Error('RAG_HYBRID_VECTOR_CANDIDATES must be a positive number')
+  }
+
+  if (!Number.isFinite(hybridBm25CandidateK) || hybridBm25CandidateK <= 0) {
+    throw new Error('RAG_HYBRID_BM25_CANDIDATES must be a positive number')
+  }
+
   return {
     topK,
     minSimilarity,
+    retrievalMode,
+    hybrid: {
+      rrfK: hybridRrfK,
+      vectorCandidateK: hybridVectorCandidateK,
+      bm25CandidateK: hybridBm25CandidateK
+    },
     openAiModel,
     openAiApiKey
   }
@@ -138,7 +173,13 @@ export async function prepareRagPrompt(options: PrepareRagPromptOptions): Promis
     throw new Error('Question is required')
   }
 
-  const retrievedChunks = await searchSimilarChunks({ question, topK: options.topK })
+  const retrievalOptions = {
+    question,
+    topK: options.topK,
+    retrievalMode: options.retrievalMode,
+    hybrid: options.hybrid
+  }
+  const retrievedChunks = await searchSimilarChunks(retrievalOptions)
   const filteredChunks = retrievedChunks.filter(chunk => chunk.similarity >= options.minSimilarity)
 
   if (filteredChunks.length === 0) {

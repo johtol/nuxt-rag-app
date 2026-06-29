@@ -24,6 +24,11 @@ export interface RagSource {
   slug: string | null
   headingText: string | null
   similarity: number
+  scoreBreakdown: {
+    vectorSimilarity: number | null
+    bm25Score: number | null
+    hybridScore: number | null
+  }
   section: string
 }
 
@@ -47,9 +52,9 @@ export interface GenerateRagAnswerResult {
 // HTTP or SSE. The route layer translates each callback into an SSE event.
 // See stream.post.ts for the full rationale behind the SSE choice.
 export interface StreamRagAnswerHandlers {
-  onSources?: (payload: { sources: RagSource[]; usedContext: boolean }) => void | Promise<void>,
-  onDelta?: (text: string) => void | Promise<void>,
-  onDone?: (answer: string) => void | Promise<void>,
+  onSources?: (payload: { sources: RagSource[], usedContext: boolean }) => void | Promise<void>
+  onDelta?: (text: string) => void | Promise<void>
+  onDone?: (answer: string) => void | Promise<void>
 }
 
 // Shared result of the retrieval + prompt-building phase.
@@ -90,7 +95,9 @@ async function prepareRagRequest(options: GenerateRagAnswerOptions): Promise<Pre
     question: options.question,
     history: options.history,
     topK: ragConfig.topK,
-    minSimilarity: ragConfig.minSimilarity
+    minSimilarity: ragConfig.minSimilarity,
+    retrievalMode: ragConfig.retrievalMode,
+    hybrid: ragConfig.hybrid
   })
 
   if (preparedPrompt.filteredChunks.length === 0) {
@@ -106,7 +113,7 @@ async function prepareRagRequest(options: GenerateRagAnswerOptions): Promise<Pre
 
   return {
     prompt: preparedPrompt.prompt,
-    sources: mapSources(preparedPrompt.filteredChunks),
+    sources: mapSources(preparedPrompt.filteredChunks, ragConfig.retrievalMode),
     usedContext: true,
     fallbackAnswer: null,
     openAiModel: ragConfig.openAiModel,
@@ -116,7 +123,7 @@ async function prepareRagRequest(options: GenerateRagAnswerOptions): Promise<Pre
 
 // Convert raw retrieved chunks into the smaller UI-friendly source objects.
 // This keeps the frontend independent from the DB/search schema details.
-function mapSources(chunks: SimilarChunk[]): RagSource[] {
+function mapSources(chunks: SimilarChunk[], retrievalMode: 'semantic' | 'hybrid'): RagSource[] {
   return chunks.map(chunk => ({
     id: chunk.id,
     title: chunk.documentTitle ?? chunk.metadata.documentMetadata?.title ?? `Document ${chunk.documentId}`,
@@ -126,6 +133,13 @@ function mapSources(chunks: SimilarChunk[]): RagSource[] {
     slug: chunk.documentSlug ?? null,
     headingText: chunk.headingText ?? null,
     similarity: chunk.similarity,
+    scoreBreakdown: {
+      vectorSimilarity: chunk.scoreBreakdown.vectorSimilarity,
+      bm25Score: chunk.scoreBreakdown.bm25Score,
+      hybridScore: retrievalMode === 'hybrid'
+        ? chunk.similarity
+        : (chunk.scoreBreakdown.hybridScore ?? chunk.similarity)
+    },
     section: chunk.headingText ?? 'No heading'
   }))
 }
